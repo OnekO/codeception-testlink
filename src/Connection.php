@@ -1,15 +1,15 @@
 <?php
-namespace BookIt\Codeception\TestRail;
+namespace OnekO\Codeception\TestLink;
 
-use BookIt\Codeception\TestRail\Action\ActionInterface;
-use BookIt\Codeception\TestRail\Exception\ActionNotFound;
-use BookIt\Codeception\TestRail\Exception\CallException;
+use OnekO\Codeception\TestLink\Action\ActionInterface;
+use OnekO\Codeception\TestLink\Exception\ActionNotFound;
+use OnekO\Codeception\TestLink\Exception\CallException;
 use GuzzleHttp\Client;
 
 /**
  * Class Connection
  *
- * @package BookIt\Codeception\TestRail
+ * @package OnekO\Codeception\TestLink
  */
 class Connection
 {
@@ -93,7 +93,7 @@ class Connection
             $uri = substr($uri, 1);
         }
 
-        $response = $this->client->request($verb, 'index.php?/api/v2/'.$uri, $opts);
+        $response = $this->client->request($verb, '/lib/api/rest/v2/'.$uri, $opts);
 
         return json_decode($response->getBody()->getContents());
     }
@@ -115,7 +115,7 @@ class Connection
                 throw new ActionNotFound(
                     sprintf(
                         '
-                    The TestRail Connection couldn\'t locate an action class for "%s".',
+                    The TestLink Connection couldn\'t locate an action class for "%s".',
                         $name
                     )
                 );

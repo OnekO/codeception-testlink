@@ -1,5 +1,5 @@
 <?php
-namespace BookIt\Codeception\TestRail;
+namespace OnekO\Codeception\TestLink;
 
 use Codeception\Event\FailEvent;
 use Codeception\Event\SuiteEvent;
@@ -81,11 +81,13 @@ class Extension extends CodeceptionExtension
         if ($this->config['enabled']) {
             $conn = $this->getConnection();
 
-            $project = $conn->execute('get_project/'. $this->config['project']);
+            $project = $conn->execute('testprojects/'. $this->config['project']);
+            var_dump($project);
+            die();
             if ($project->is_completed) {
                 throw new ExtensionException(
                     $this,
-                    'TestRail project id passed in the config has been completed and cannot be modified'
+                    'TestLink project id passed in the config has been completed and cannot be modified'
                 );
             }
 
@@ -293,9 +295,9 @@ class Extension extends CodeceptionExtension
     }
 
     /**
-     * @param int   $suite  TestRail Suite ID
-     * @param int   $case   TestRail Case ID
-     * @param int   $status TestRail Status ID
+     * @param int   $suite  TestLink Suite ID
+     * @param int   $case   TestLink Case ID
+     * @param int   $status TestLink Status ID
      * @param array $other  Array of other elements to add to the result (comments, elapsed, etc)
      */
     public function handleResult($suite, $case, $status, $optional = [])
@@ -361,7 +363,7 @@ class Extension extends CodeceptionExtension
     }
 
     /**
-     * Formats a float seconds to a format that TestRail recognizes.  Will parse to hours, minutes, and seconds.
+     * Formats a float seconds to a format that TestLink recognizes.  Will parse to hours, minutes, and seconds.
      *
      * @param float $time
      *
@@ -369,7 +371,7 @@ class Extension extends CodeceptionExtension
      */
     public function formatTime($time)
     {
-        // TestRail doesn't support subsecond times
+        // TestLink doesn't support subsecond times
         if ($time < 1.0) {
             return '0s';
         }

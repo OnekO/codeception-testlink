@@ -1,9 +1,9 @@
 <?php
 
 
-namespace BookIt\Codeception\TestRail\Action;
+namespace OnekO\Codeception\TestLink\Action;
 
-use BookIt\Codeception\TestRail\Connection;
+use OnekO\Codeception\TestLink\Connection;
 
 trait BasicActionTrait
 {

@@ -1,5 +1,5 @@
 <?php
-namespace BookIt\Codeception\TestRail\Exception;
+namespace OnekO\Codeception\TestLink\Exception;
 
 class CallException extends \RuntimeException
 {
