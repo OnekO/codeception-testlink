@@ -14,6 +14,8 @@ use Codeception\Util\Annotation;
 
 class Extension extends CodeceptionExtension
 {
+    const ANNOTATION_SUITE = 'tl-suite';
+    const ANNOTATION_SUITE_PREFIX = 'tl-suite-prefix';
     const ANNOTATION_CASE  = 'tl-case';
     const ANNOTATION_SUMMARY  = 'tl-summary';
     const ANNOTATION_PRECONDITIONS  = 'tl-preconditions';
@@ -87,53 +89,25 @@ class Extension extends CodeceptionExtension
         // we only care to do these things if the extension is enabled
         if ($this->config['enabled']) {
             $conn = $this->getConnection();
-
-            $result = $conn->execute('testprojects/'. $this->config['project']);
-            if ($result->status !== 'ok') {
-                throw new ExtensionException(
-                    $this,
-                    'Error trying to get the project'
+            $project = $conn->execute('getTestProjectByName', ['testprojectname' => $this->config['project']]);
+            if ($project === null) {
+                $currentPlan = $conn->execute(
+                    'createTestProject',
+                    [
+                        'testprojectname' => $this->config['project'],
+                        'testcaseprefix' => $this->getPrefix($this->config['project']),
+                        'notes' => 'Created via Codeception Extension'
+                    ]
                 );
             }
-            $project = $result->item[0];
-            if ($project->active === 0) {
+            if ($project['active'] === 0) {
                 throw new ExtensionException(
                     $this,
                     'TestLink project id passed in the config is not active'
                 );
             }
 
-            $result = $conn->execute('testprojects/'. $this->config['project'] . '/testplans');
-            if ($result->status !== 'ok') {
-                throw new ExtensionException(
-                    $this,
-                    'Error trying to get project\'s plans'
-                );
-            }
-            $plans = $result->items;
-            $planExists = false;
-            foreach ($plans as $plan) {
-                if ($plan->name === $this->config['testplan']) {
-                    $planExists = true;
-                    $currentPlan = $plan;
-                }
-            }
-            if ($planExists === false) {
-                // This is not working due a TestLink REST API bug
-                $currentPlan = $conn->execute(
-                    '/testplans',
-                    'POST',
-                    [
-                        'name' => $this->config['testplan'],
-                        'testProjectID' => $project->id,
-                        'active' => true,
-                        'notes' => '',
-                        'is_public' => false
-                    ]
-                );
-            }
-            $this->project = $project->id;
-            $this->plan = $currentPlan->id;
+            $this->project = $project;
         }
 
         // merge the statuses from the config over the default ones
@@ -151,40 +125,63 @@ class Extension extends CodeceptionExtension
             return;
         }
 
-        $result = $this->getConnection()->execute('testprojects/'. $this->config['project'] . '/testcases');
-        if ($result->status === 'ok') {
-            $cases = $result->items;
-        }
-
         foreach ($recorded as $suiteId => $results) {
+            $suite = $this->getConnection()->execute('getTestSuite', [
+                'testsuitename' => $suiteId,
+                'prefix' => $this->project['prefix']
+            ]);
+            if ($suite === null) {
+                $suite = $this->getConnection()->execute(
+                    'createTestSuite',
+                    [
+                        'testprojectname' => $this->config['project'],
+                        'testsuitename' => $suiteId,
+                        'prefix' => $this->project['prefix'],
+                        'details' => 'Created via Codeception Extension',
+                        'checkduplicatedname' => 1,
+                        'actiononduplicatedname' => 'generate_new',
+                    ]
+                );
+            }
+            if ($suite !== null) {
+                $suite = current($suite);
+            }
+            var_dump($suite);
+            $cases = [];
+            $result = $this->getConnection()->execute('getTestCasesForTestSuite', [
+                'testprojectid' => $this->project['id'],
+                'testsuiteid' => $suite['id'],
+                'deep' => true
+            ]);
+            if (is_array($result)) {
+                $cases = $result;
+            }
+            var_dump($cases);
             foreach ($results as $testResult) {
+                var_dump($testResult);
                 $caseExists = false;
-                if ($cases !== null) {
-                    foreach ($cases as $case) {
-                        if ($case->name === $testResult['name']) {
-                            $caseExists = true;
-                        }
+                foreach ($cases as $case) {
+                    if ($case['name'] === $testResult['name']) {
+                        $caseExists = true;
                     }
                 }
+
                 if ($caseExists === false) {
-                    var_dump($this->plan);
                     $params = [
-                        'name' => $testResult['name'],
-                        'testSuite' => $this->plan,
-                        'testProject' => ['id' => $this->project],
-//                        'author' => ['id' => $this->config['authorId'], 'login' => $this->config['author']],
-//                        'testSuiteID' => $this->plan,
-//                        'testProjectID' => $this->project,
-                        'authorLogin' => $this->config['author'],
-                        'authorID' => $this->config['authorId'],
+                        'testcasename' => $testResult['name'],
+                        'testsuiteid' => $suite['id'],
+                        'testprojectid' => $this->project['id'],
+                        'authorlogin' => $this->config['author'],
                         'summary' => $testResult['summary'] !== null ? $testResult['summary'] : '',
                         'preconditions' => $testResult['preconditions'] !== null ? $testResult['preconditions'] : '',
                         'importance' => $testResult['importance'] !== null ? $testResult['importance'] : '',
                         'executionType' => $testResult['executionType'] !== null ? $testResult['executionType'] : '',
                         'order' => $testResult['order'] !== null ? $testResult['order'] : '',
+                        'steps' => [],
+                        'estimatedexecduration' => $testResult['elapsed']
                     ];
-                    var_dump('Creo nuevo case', json_encode($params));
-                    $resultNewCase =  $this->getConnection()->execute('/testcases', 'POST', $params);
+                    var_dump('Creo nuevo case', $params);
+                    $resultNewCase =  $this->getConnection()->execute('createTestCase', $params);
                     var_dump($resultNewCase);
                 }
             }
@@ -304,8 +301,40 @@ class Extension extends CodeceptionExtension
 
             $result['elapsed'] = $this->formatTime($event->getTime());
 
-            $this->results[$this->config['testplan']][] = $result;
+            $this->results[$this->getSuiteForTest($test)][] = $result;
         }
+    }
+
+    /**
+     * @param TestInterface $test
+     *
+     * @return int|null
+     *
+     * @codeCoverageIgnore
+     */
+    public function getSuiteForTest(TestInterface $test)
+    {
+        if (!$test instanceof Cest) {
+            return null;
+        }
+
+        return Annotation::forClass($test->getTestClass())->fetch($this::ANNOTATION_SUITE);
+    }
+
+    /**
+     * @param TestInterface $test
+     *
+     * @return int|null
+     *
+     * @codeCoverageIgnore
+     */
+    public function getSuitePrefixForTest(TestInterface $test)
+    {
+        if (!$test instanceof Cest) {
+            return null;
+        }
+
+        return Annotation::forClass($test->getTestClass())->fetch($this::ANNOTATION_SUITE_PREFIX);
     }
 
     /**
@@ -437,5 +466,19 @@ class Extension extends CodeceptionExtension
         }
 
         return trim($formatted);
+    }
+
+    protected function getPrefix($str)
+    {
+        $str = strtoupper($str);
+        $tmp = explode(' ', $str);
+        if (count($tmp) < 3) {
+            return substr($str, 0, 3);
+        }
+        $prefix = '';
+        foreach (array_slice($tmp, 0,3) as $substr) {
+            $prefix .= substr(preg_replace('#[aeiou\s]+#i', '', $substr), 0, 1);
+        }
+        return $prefix;
     }
 }

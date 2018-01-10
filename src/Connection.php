@@ -66,7 +66,8 @@ class Connection
      */
     public function execute($method, $args)
     {
-        $args['api_key'] = $this->getApiKey();
+        var_dump($method, $args);
+        $args['devKey'] = $this->getApiKey();
         $response = null;
         if ($this->client->query("tl.{$method}", $args)) {
             $response = $this->client->getResponse();
