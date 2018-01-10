@@ -1,3 +1,5 @@
+[WORK IN PROGRESS - NOT USABLE YET]
+
 As you can see, this is heavily based on https://github.com/bookitcom/codeception-testrail
 
 # Codeception TestLink Integration Module
