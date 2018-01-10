@@ -1,0 +1,23 @@
+{
+    "name": "oneko/codeception-testlink",
+    "description": "Codeception Extension for Testlink Reporting",
+    "homepage": "https://github.com/oneko/codeception-testlink",
+    "license": "MIT",
+    "require": {
+        "codeception/codeception": "^2.3",
+        "guzzlehttp/guzzle": "^6.3"
+    },
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^2.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "OnekO\\Codeception\\TestLink\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "OnekO\\Codeception\\TestLink\\Tests\\Unit\\": "tests/unit"
+        }
+    }
+}
