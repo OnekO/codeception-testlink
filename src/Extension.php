@@ -14,8 +14,12 @@ use Codeception\Util\Annotation;
 
 class Extension extends CodeceptionExtension
 {
-    const ANNOTATION_SUITE = 'tr-suite';
-    const ANNOTATION_CASE  = 'tr-case';
+    const ANNOTATION_CASE  = 'tl-case';
+    const ANNOTATION_SUMMARY  = 'tl-summary';
+    const ANNOTATION_PRECONDITIONS  = 'tl-preconditions';
+    const ANNOTATION_IMPORTANCE  = 'tl-importance';
+    const ANNOTATION_EXECUTION_TYPE  = 'tl-execution-type';
+    const ANNOTATION_ORDER  = 'tl-order';
 
     const STATUS_SUCCESS    = 'success';
     const STATUS_SKIPPED    = 'skipped';
@@ -75,33 +79,61 @@ class Extension extends CodeceptionExtension
         self::STATUS_ERROR      => self::TESTRAIL_STATUS_FAILED,
     ];
 
+    /**
+     * @throws ExtensionException
+     */
     public function _initialize()
     {
         // we only care to do these things if the extension is enabled
         if ($this->config['enabled']) {
             $conn = $this->getConnection();
 
-            $project = $conn->execute('testprojects/'. $this->config['project']);
-            var_dump($project);
-            die();
-            if ($project->is_completed) {
+            $result = $conn->execute('testprojects/'. $this->config['project']);
+            if ($result->status !== 'ok') {
                 throw new ExtensionException(
                     $this,
-                    'TestLink project id passed in the config has been completed and cannot be modified'
+                    'Error trying to get the project'
+                );
+            }
+            $project = $result->item[0];
+            if ($project->active === 0) {
+                throw new ExtensionException(
+                    $this,
+                    'TestLink project id passed in the config is not active'
                 );
             }
 
-            // TODO: procedural generation of test plan names (template?  provider class?)
-            $plan = $conn->execute(
-                'add_plan/'. $project->id,
-                'POST',
-                [
-                'name' => date('Y-m-d H:i:s'),
-                ]
-            );
-
+            $result = $conn->execute('testprojects/'. $this->config['project'] . '/testplans');
+            if ($result->status !== 'ok') {
+                throw new ExtensionException(
+                    $this,
+                    'Error trying to get project\'s plans'
+                );
+            }
+            $plans = $result->items;
+            $planExists = false;
+            foreach ($plans as $plan) {
+                if ($plan->name === $this->config['testplan']) {
+                    $planExists = true;
+                    $currentPlan = $plan;
+                }
+            }
+            if ($planExists === false) {
+                // This is not working due a TestLink REST API bug
+                $currentPlan = $conn->execute(
+                    '/testplans',
+                    'POST',
+                    [
+                        'name' => $this->config['testplan'],
+                        'testProjectID' => $project->id,
+                        'active' => true,
+                        'notes' => '',
+                        'is_public' => false
+                    ]
+                );
+            }
             $this->project = $project->id;
-            $this->plan = $plan->id;
+            $this->plan = $currentPlan->id;
         }
 
         // merge the statuses from the config over the default ones
@@ -113,151 +145,104 @@ class Extension extends CodeceptionExtension
     public function afterSuite(SuiteEvent $event)
     {
         $recorded = $this->getResults();
+        var_dump($recorded);
         // skip action if we don't have results or the Extension is disabled
         if (empty($recorded) || !$this->config['enabled']) {
             return;
         }
 
-        $conn = $this->getConnection();
+        $result = $this->getConnection()->execute('testprojects/'. $this->config['project'] . '/testcases');
+        if ($result->status === 'ok') {
+            $cases = $result->items;
+        }
 
         foreach ($recorded as $suiteId => $results) {
-            $caseIds = array_reduce(
-                $results,
-                function ($carry, $val) {
-                    $carry[] = $val['case_id'];
-                    return $carry;
-                },
-                []
-            );
-
-            $suiteDetails = $conn->execute('/get_suite/'. $suiteId);
-
-            $entry = $conn->execute(
-                '/add_plan_entry/'. $this->plan,
-                'POST',
-                [
-                'suite_id' => $suiteId,
-                'name' => $event->getSuite()->getName(). ' : '. $suiteDetails->name,
-                'case_ids' => $caseIds,
-                'include_all' => false,
-                ]
-            );
-
-            $results = array_filter(
-                $results,
-                function ($val) {
-                    return $val['status_id'] != $this::TESTRAIL_STATUS_UNTESTED;
+            foreach ($results as $testResult) {
+                $caseExists = false;
+                if ($cases !== null) {
+                    foreach ($cases as $case) {
+                        if ($case->name === $testResult['name']) {
+                            $caseExists = true;
+                        }
+                    }
                 }
-            );
-
-            $run = $entry->runs[0];
-            $conn->execute(
-                '/add_results_for_cases/'. $run->id,
-                'POST',
-                [
-                'results' => $results,
-                ]
-            );
+                if ($caseExists === false) {
+                    var_dump($this->plan);
+                    $params = [
+                        'name' => $testResult['name'],
+                        'testSuite' => $this->plan,
+                        'testProject' => ['id' => $this->project],
+//                        'author' => ['id' => $this->config['authorId'], 'login' => $this->config['author']],
+//                        'testSuiteID' => $this->plan,
+//                        'testProjectID' => $this->project,
+                        'authorLogin' => $this->config['author'],
+                        'authorID' => $this->config['authorId'],
+                        'summary' => $testResult['summary'] !== null ? $testResult['summary'] : '',
+                        'preconditions' => $testResult['preconditions'] !== null ? $testResult['preconditions'] : '',
+                        'importance' => $testResult['importance'] !== null ? $testResult['importance'] : '',
+                        'executionType' => $testResult['executionType'] !== null ? $testResult['executionType'] : '',
+                        'order' => $testResult['order'] !== null ? $testResult['order'] : '',
+                    ];
+                    var_dump('Creo nuevo case', json_encode($params));
+                    $resultNewCase =  $this->getConnection()->execute('/testcases', 'POST', $params);
+                    var_dump($resultNewCase);
+                }
+            }
         }
     }
 
+    /**
+     * @param TestEvent $event
+     */
     public function success(TestEvent $event)
     {
-        $test = $event->getTest();
-
-        if (!$test instanceof Cest) {
-            return;
-        }
-
-        $suite = $this->getSuiteForTest($test);
-        $case = $this->getCaseForTest($test);
         $this->handleResult(
-            $suite,
-            $case,
             $this->statuses[$this::STATUS_SUCCESS],
-            [
-            'elapsed' => $event->getTime(),
-            ]
+            $event
         );
     }
 
+    /**
+     * @param TestEvent $event
+     */
     public function skipped(TestEvent $event)
     {
-        $test = $event->getTest();
-
-        if (!$test instanceof Cest) {
-            return;
-        }
-
-        $suite = $this->getSuiteForTest($test);
-        $case = $this->getCaseForTest($test);
         $this->handleResult(
-            $suite,
-            $case,
             $this->statuses[$this::STATUS_SKIPPED],
-            [
-            'elapsed' => $event->getTime(),
-            ]
+            $event
         );
     }
 
+    /**
+     * @param TestEvent $event
+     */
     public function incomplete(TestEvent $event)
     {
-        $test = $event->getTest();
-
-        if (!$test instanceof Cest) {
-            return;
-        }
-
-        $suite = $this->getSuiteForTest($test);
-        $case = $this->getCaseForTest($test);
         $this->handleResult(
-            $suite,
-            $case,
             $this->statuses[$this::STATUS_INCOMPLETE],
-            [
-            'elapsed' => $event->getTime(),
-            ]
+            $event
         );
     }
 
+    /**
+     * @param FailEvent $event
+     */
     public function failed(FailEvent $event)
     {
-        $test = $event->getTest();
-
-        if (!$test instanceof Cest) {
-            return;
-        }
-
-        $suite = $this->getSuiteForTest($test);
-        $case = $this->getCaseForTest($test);
         $this->handleResult(
-            $suite,
-            $case,
             $this->statuses[$this::STATUS_FAILED],
-            [
-            'elapsed' => $event->getTime(),
-            ]
+            $event
         );
     }
 
+    /**
+     * @param FailEvent $event
+     */
     public function errored(FailEvent $event)
     {
-        $test = $event->getTest();
-
-        if (!$test instanceof Cest) {
-            return;
-        }
-
-        $suite = $this->getSuiteForTest($test);
-        $case = $this->getCaseForTest($test);
         $this->handleResult(
-            $suite,
-            $case,
             $this->statuses[$this::STATUS_ERROR],
-            [
-            'elapsed' => $event->getTime(),
-            ]
+            $event
         );
     }
 
@@ -275,11 +260,10 @@ class Extension extends CodeceptionExtension
     public function getConnection()
     {
         if (!$this->conn) {
-            $conn = new Connection();
-            $conn->setUser($this->config['user']);
-            $conn->setApiKey($this->config['apikey']);
-            $conn->connect($this->config['url']);
-            $this->conn = $conn;
+            $newConn = new Connection();
+            $newConn->setApiKey($this->config['apikey']);
+            $newConn->connect($this->config['url']);
+            $this->conn = $newConn;
         }
         return $this->conn;
     }
@@ -295,55 +279,33 @@ class Extension extends CodeceptionExtension
     }
 
     /**
-     * @param int   $suite  TestLink Suite ID
      * @param int   $case   TestLink Case ID
      * @param int   $status TestLink Status ID
      * @param array $other  Array of other elements to add to the result (comments, elapsed, etc)
      */
-    public function handleResult($suite, $case, $status, $optional = [])
+    public function handleResult($status, TestEvent $event)
     {
-        if ($suite && $case) {
+        $test = $event->getTest();
+        if (!$test instanceof Cest) {
+            return;
+        }
+
+        $case = $this->getCaseForTest($test);
+        if ($case) {
             $result = [
-                'case_id' => $case,
+                'name' => $case,
+                'summary' => $this->getSummaryForTest($test),
+                'preconditions' => $this->getPreconditionsForTest($test),
+                'importance' => $this->getImportanceForTest($test),
+                'executionType' => $this->getExecutionTypeForTest($test),
+                'order' => $this->getOrderForTest($test),
                 'status_id' => $status,
             ];
 
-            if (!empty($optional)) {
-                if (isset($optional['comment'])) {
-                    $result['comment'] = $optional['comment'];
-                }
+            $result['elapsed'] = $this->formatTime($event->getTime());
 
-                if (isset($optional['elapsed'])) {
-                    $result['elapsed'] = $this->formatTime($optional['elapsed']);
-                }
-            }
-
-            $this->results[$suite][] = $result;
+            $this->results[$this->config['testplan']][] = $result;
         }
-    }
-
-    /**
-     * @param TestInterface $test
-     *
-     * @return int|null
-     *
-     * @codeCoverageIgnore
-     */
-    public function getSuiteForTest(TestInterface $test)
-    {
-        if (!$test instanceof Cest) {
-            return null;
-        }
-
-        $suite = Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_SUITE);
-        if (!$suite) {
-            $suite = Annotation::forClass($test->getTestClass())->fetch($this::ANNOTATION_SUITE);
-            if (!$suite) {
-                return null;
-            }
-        }
-
-        return $suite;
     }
 
     /**
@@ -360,6 +322,86 @@ class Extension extends CodeceptionExtension
         }
 
         return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_CASE);
+    }
+
+    /**
+     * @param TestInterface $test
+     *
+     * @return int|null
+     *
+     * @codeCoverageIgnore
+     */
+    public function getSummaryForTest(TestInterface $test)
+    {
+        if (!$test instanceof Cest) {
+            return null;
+        }
+
+        return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_SUMMARY);
+    }
+
+    /**
+     * @param TestInterface $test
+     *
+     * @return int|null
+     *
+     * @codeCoverageIgnore
+     */
+    public function getPreconditionsForTest(TestInterface $test)
+    {
+        if (!$test instanceof Cest) {
+            return null;
+        }
+
+        return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_PRECONDITIONS);
+    }
+
+    /**
+     * @param TestInterface $test
+     *
+     * @return int|null
+     *
+     * @codeCoverageIgnore
+     */
+    public function getImportanceForTest(TestInterface $test)
+    {
+        if (!$test instanceof Cest) {
+            return null;
+        }
+
+        return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_IMPORTANCE);
+    }
+
+    /**
+     * @param TestInterface $test
+     *
+     * @return int|null
+     *
+     * @codeCoverageIgnore
+     */
+    public function getExecutionTypeForTest(TestInterface $test)
+    {
+        if (!$test instanceof Cest) {
+            return null;
+        }
+
+        return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_EXECUTION_TYPE);
+    }
+
+    /**
+     * @param TestInterface $test
+     *
+     * @return int|null
+     *
+     * @codeCoverageIgnore
+     */
+    public function getOrderForTest(TestInterface $test)
+    {
+        if (!$test instanceof Cest) {
+            return null;
+        }
+
+        return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_ORDER);
     }
 
     /**

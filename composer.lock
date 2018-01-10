@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#composer-lock-the-lock-file",
         "This file is @generated automatically"
     ],
-    "content-hash": "ea3cce7df6cd9aa39a178380e5d51188",
+    "content-hash": "09afa374563fe7881676b94a2792819f",
     "packages": [
         {
             "name": "behat/gherkin",
@@ -444,6 +444,49 @@
                 "url"
             ],
             "time": "2017-03-20T17:10:46+00:00"
+        },
+        {
+            "name": "kissifrot/php-ixr",
+            "version": "1.8.3",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/kissifrot/php-ixr.git",
+                "reference": "4477cd1a67416ce5b6a2080f9a79d9eb50a965c1"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/kissifrot/php-ixr/zipball/4477cd1a67416ce5b6a2080f9a79d9eb50a965c1",
+                "reference": "4477cd1a67416ce5b6a2080f9a79d9eb50a965c1",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=5.4.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "IXR\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "authors": [
+                {
+                    "name": "Incutio Ltd 2010 - Simon Willison",
+                    "homepage": "http://scripts.incutio.com/xmlrpc/"
+                }
+            ],
+            "description": "Incutio XML-RPC library (IXR)",
+            "homepage": "http://scripts.incutio.com/xmlrpc/",
+            "keywords": [
+                "remote procedure call",
+                "rpc",
+                "xlm-rpc",
+                "xmlrpc"
+            ],
+            "time": "2016-11-17T12:00:18+00:00"
         },
         {
             "name": "myclabs/deep-copy",

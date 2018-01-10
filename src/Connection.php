@@ -1,10 +1,10 @@
 <?php
 namespace OnekO\Codeception\TestLink;
 
+use IXR\Client\Client;
 use OnekO\Codeception\TestLink\Action\ActionInterface;
 use OnekO\Codeception\TestLink\Exception\ActionNotFound;
 use OnekO\Codeception\TestLink\Exception\CallException;
-use GuzzleHttp\Client;
 
 /**
  * Class Connection
@@ -13,13 +13,7 @@ use GuzzleHttp\Client;
  */
 class Connection
 {
-    const AUTH_USER   = 0;
-    const AUTH_APIKEY = 1;
-
-    /**
-     * @var string[]
-     */
-    protected $auth = [];
+    const API_PATH = '/lib/api/xmlrpc/v1/xmlrpc.php';
 
     /**
      * @var Client
@@ -31,20 +25,20 @@ class Connection
      */
     protected $actions;
 
-    /**
-     * @param string $user
-     */
-    public function setUser($user)
-    {
-        $this->auth[$this::AUTH_USER] = (string)$user;
-    }
+    /** @var string */
+    protected $apiKey;
 
     /**
      * @param string $apikey
      */
     public function setApiKey($apikey)
     {
-        $this->auth[$this::AUTH_APIKEY] = (string)$apikey;
+        $this->apiKey = (string)$apikey;
+    }
+
+    public function getApiKey()
+    {
+        return $this->apiKey;
     }
 
     /**
@@ -53,11 +47,7 @@ class Connection
     public function connect($baseUri)
     {
         $this->setClient(
-            new Client(
-                [
-                'base_uri' => $baseUri,
-                ]
-            )
+            new Client($baseUri . static::API_PATH)
         );
     }
 
@@ -70,32 +60,19 @@ class Connection
     }
 
     /**
-     * @param string $uri
-     * @param string $verb
-     * @param array  $payload
+     * @param $method
+     * @param $args
+     * @return null|string
      */
-    public function execute($uri, $verb = 'GET', array $payload = [])
+    public function execute($method, $args)
     {
-        $opts = [
-            'auth' => $this->auth,
-            'headers' => [
-                'Accept' => 'application/json',
-                'Content-Type' => 'application/json',
-            ],
-        ];
-
-        if (!empty($payload) && $verb == 'POST') {
-            $opts['json'] = $payload;
+        $args['api_key'] = $this->getApiKey();
+        $response = null;
+        if ($this->client->query("tl.{$method}", $args)) {
+            $response = $this->client->getResponse();
         }
 
-        // strip the leading slash since we're adding it back when we append the base
-        if (strpos($uri, '/') === 0) {
-            $uri = substr($uri, 1);
-        }
-
-        $response = $this->client->request($verb, '/lib/api/rest/v2/'.$uri, $opts);
-
-        return json_decode($response->getBody()->getContents());
+        return $response;
     }
 
     /**

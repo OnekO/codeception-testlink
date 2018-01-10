@@ -5,7 +5,7 @@
     "license": "MIT",
     "require": {
         "codeception/codeception": "^2.3",
-        "guzzlehttp/guzzle": "^6.3"
+        "kissifrot/php-ixr": "^1.8"
     },
     "require-dev": {
         "squizlabs/php_codesniffer": "^2.6"
