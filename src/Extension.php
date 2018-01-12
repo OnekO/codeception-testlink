@@ -7,6 +7,7 @@ use Codeception\Event\TestEvent;
 use Codeception\Events;
 use Codeception\Exception\ExtensionException;
 use Codeception\Extension as CodeceptionExtension;
+use Codeception\Lib\Parser;
 use Codeception\Test\Cest;
 use Codeception\Test\Test;
 use Codeception\TestInterface;
@@ -22,6 +23,7 @@ class Extension extends CodeceptionExtension
     const ANNOTATION_IMPORTANCE  = 'tl-importance';
     const ANNOTATION_EXECUTION_TYPE  = 'tl-execution-type';
     const ANNOTATION_ORDER  = 'tl-order';
+    const ANNOTATION_STEP  = 'tl-step';
 
     const STATUS_SUCCESS    = 0;
     const STATUS_SKIPPED    = 1;
@@ -243,7 +245,7 @@ class Extension extends CodeceptionExtension
                         'executiontype' => $testResult['executionType'] !== null ? $testResult['executionType'] : 2,
                         'order' => $testResult['order'] !== null ? $testResult['order'] : '',
                         'status' => 7,
-                        'steps' => [],
+                        'steps' => $testResult['steps'] !== null ? $testResult['steps'] : [],
                         'estimatedexecduration' => round($testResult['elapsed'] / 60 / 1000, 2) // minutes
                     ];
                     $resultNewCase =  $this->getConnection()->execute('createTestCase', $params);
@@ -369,6 +371,7 @@ class Extension extends CodeceptionExtension
      */
     public function handleResult($status, TestEvent $event)
     {
+        /** @var Cest $test */
         $test = $event->getTest();
         if (!$test instanceof Cest) {
             return;
@@ -384,12 +387,13 @@ class Extension extends CodeceptionExtension
                 'executionType' => $this->getExecutionTypeForTest($test),
                 'order' => $this->getOrderForTest($test),
                 'status' => $status,
+                'steps' => $this->getStepsForTest($test)
             ];
-
             $result['elapsed'] = $event->getTime();
 
             $this->results[$this->getSuiteForTest($test)][] = $result;
         }
+        var_dump($this->results);
     }
 
     /**
@@ -520,6 +524,36 @@ class Extension extends CodeceptionExtension
         return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_ORDER);
     }
 
+    /**
+     * @param TestInterface $test
+     *
+     * @return array|null
+     *
+     * @codeCoverageIgnore
+     */
+    public function getStepsForTest(TestInterface $test)
+    {
+        if (!$test instanceof Cest) {
+            return null;
+        }
+
+        $result = [];
+        $steps = Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetchAll($this::ANNOTATION_STEP);
+        foreach ($steps as $i => $step) {
+            $exploded = explode('|||', $step);
+            $result[] = [
+                'step_number' => $i + 1,
+                'actions' => $exploded[0],
+                'expected_results' => $exploded[1],
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * @param $str
+     * @return bool|string
+     */
     protected function getPrefix($str)
     {
         $str = strtoupper($str);
