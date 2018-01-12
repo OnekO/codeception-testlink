@@ -23,17 +23,17 @@ class Extension extends CodeceptionExtension
     const ANNOTATION_EXECUTION_TYPE  = 'tl-execution-type';
     const ANNOTATION_ORDER  = 'tl-order';
 
-    const STATUS_SUCCESS    = 'success';
-    const STATUS_SKIPPED    = 'skipped';
-    const STATUS_INCOMPLETE = 'incomplete';
-    const STATUS_FAILED     = 'failed';
-    const STATUS_ERROR      = 'error';
+    const STATUS_SUCCESS    = 0;
+    const STATUS_SKIPPED    = 1;
+    const STATUS_INCOMPLETE = 2;
+    const STATUS_FAILED     = 3;
+    const STATUS_ERROR      = 4;
 
-    const TESTRAIL_STATUS_SUCCESS = 1;
-    const TESTRAIL_STATUS_FAILED = 5;
-    const TESTRAIL_STATUS_UNTESTED = 3;
-    const TESTRAIL_STATUS_RETEST = 4;
-    const TESTRAIL_STATUS_BLOCKED = 2;
+    const TESTLINK_STATUS_SUCCESS = 'p';
+    const TESTLINK_STATUS_FAILED = 'f';
+    const TESTLINK_STATUS_UNTESTED = 'n';
+    const TESTLINK_STATUS_RETEST = 'x';
+    const TESTLINK_STATUS_BLOCKED = 'b';
 
     public static $events = [
         Events::SUITE_AFTER     => 'afterSuite',
@@ -51,14 +51,19 @@ class Extension extends CodeceptionExtension
     protected $conn;
 
     /**
-     * @var int
+     * @var array
      */
     protected $project;
 
     /**
-     * @var int
+     * @var array
      */
     protected $plan;
+
+    /**
+     * @var array
+     */
+    protected $build;
 
     /**
      * @var array
@@ -74,11 +79,11 @@ class Extension extends CodeceptionExtension
      * @var array
      */
     protected $statuses = [
-        self::STATUS_SUCCESS    => self::TESTRAIL_STATUS_SUCCESS,
-        self::STATUS_SKIPPED    => self::TESTRAIL_STATUS_UNTESTED,
-        self::STATUS_INCOMPLETE => self::TESTRAIL_STATUS_SUCCESS,
-        self::STATUS_FAILED     => self::TESTRAIL_STATUS_FAILED,
-        self::STATUS_ERROR      => self::TESTRAIL_STATUS_FAILED,
+        self::STATUS_SUCCESS    => self::TESTLINK_STATUS_SUCCESS,
+        self::STATUS_SKIPPED    => self::TESTLINK_STATUS_UNTESTED,
+        self::STATUS_INCOMPLETE => self::TESTLINK_STATUS_SUCCESS,
+        self::STATUS_FAILED     => self::TESTLINK_STATUS_FAILED,
+        self::STATUS_ERROR      => self::TESTLINK_STATUS_FAILED,
     ];
 
     /**
@@ -91,7 +96,7 @@ class Extension extends CodeceptionExtension
             $conn = $this->getConnection();
             $project = $conn->execute('getTestProjectByName', ['testprojectname' => $this->config['project']]);
             if ($project === null) {
-                $currentPlan = $conn->execute(
+                $currentProject = $conn->execute(
                     'createTestProject',
                     [
                         'testprojectname' => $this->config['project'],
@@ -99,6 +104,8 @@ class Extension extends CodeceptionExtension
                         'notes' => 'Created via Codeception Extension'
                     ]
                 );
+                echo 'Project created: ' . current($currentProject)['message'];
+                $project = $conn->execute('getTestProjectByName', ['testprojectname' => $this->config['project']]);
             }
             if ($project['active'] === 0) {
                 throw new ExtensionException(
@@ -107,7 +114,56 @@ class Extension extends CodeceptionExtension
                 );
             }
 
+            $testPlan = current($conn->execute(
+                'getTestPlanByName', [
+                    'testprojectname' => $this->config['project'],
+                    'testplanname' => $this->config['plan']
+                ]
+            ));
+            if (!isset($testPlan['id'])) {
+                $currentPlan = $conn->execute(
+                    'createTestPlan',
+                    [
+                        'testprojectname' => $this->config['project'],
+                        'testplanname' => $this->config['plan'],
+                        'notes' => 'Created via Codeception Extension'
+                    ]
+                );
+                echo 'Plan created: ' . current($currentPlan)['message'];
+                $testPlan = current($conn->execute(
+                    'getTestPlanByName', [
+                        'testprojectname' => $this->config['project'],
+                        'testplanname' => $this->config['plan']
+                    ]
+                ));
+            }
+
+            $builds = $conn->execute(
+                'getBuildsForTestPlan', [
+                    'testplanid' => $testPlan['id']
+                ]
+            );
+            if (!is_array($builds) || count($builds) < 1) {
+                $currentBuild = $conn->execute(
+                    'createBuild',
+                    [
+                        'testplanid' => $testPlan['id'],
+                        'buildname' => 'Auto',
+                        'notes' => 'Created via Codeception Extension',
+                        'active' => 1
+                    ]
+                );
+                echo 'Build created: ' . current($currentBuild)['message'];
+                $builds = $conn->execute(
+                    'getBuildsForTestPlan', [
+                        'testplanid' => $testPlan['id']
+                    ]
+                );
+            }
+
             $this->project = $project;
+            $this->plan = $testPlan;
+            $this->build = $builds[count($builds) - 1];
         }
 
         // merge the statuses from the config over the default ones
@@ -119,7 +175,7 @@ class Extension extends CodeceptionExtension
     public function afterSuite(SuiteEvent $event)
     {
         $recorded = $this->getResults();
-        var_dump($recorded);
+//        var_dump($recorded);
         // skip action if we don't have results or the Extension is disabled
         if (empty($recorded) || !$this->config['enabled']) {
             return;
@@ -130,8 +186,9 @@ class Extension extends CodeceptionExtension
                 'testsuitename' => $suiteId,
                 'prefix' => $this->project['prefix']
             ]);
-            if ($suite === null) {
-                $suite = $this->getConnection()->execute(
+//            var_dump('Obtenida: ', $suite);
+            if (empty($suite)) {
+                $resultNewSuite = $this->getConnection()->execute(
                     'createTestSuite',
                     [
                         'testprojectname' => $this->config['project'],
@@ -142,11 +199,16 @@ class Extension extends CodeceptionExtension
                         'actiononduplicatedname' => 'generate_new',
                     ]
                 );
+                echo 'Suite created:' . current($resultNewSuite)['message'];
+                $suite = $this->getConnection()->execute('getTestSuite', [
+                    'testsuitename' => $suiteId,
+                    'prefix' => $this->project['prefix']
+                ]);
             }
             if ($suite !== null) {
                 $suite = current($suite);
             }
-            var_dump($suite);
+//            var_dump($suite);
             $cases = [];
             $result = $this->getConnection()->execute('getTestCasesForTestSuite', [
                 'testprojectid' => $this->project['id'],
@@ -156,17 +218,20 @@ class Extension extends CodeceptionExtension
             if (is_array($result)) {
                 $cases = $result;
             }
-            var_dump($cases);
+//            var_dump($cases);
             foreach ($results as $testResult) {
-                var_dump($testResult);
-                $caseExists = false;
+//                var_dump($testResult);
+                $testCase = false;
                 foreach ($cases as $case) {
                     if ($case['name'] === $testResult['name']) {
-                        $caseExists = true;
+//                        var_dump($case);
+                        $testCase = current($this->getConnection()->execute('getTestCase', [
+                            'testcaseid' => $case['id']
+                        ]));
                     }
                 }
 
-                if ($caseExists === false) {
+                if ($testCase === false) {
                     $params = [
                         'testcasename' => $testResult['name'],
                         'testsuiteid' => $suite['id'],
@@ -174,16 +239,39 @@ class Extension extends CodeceptionExtension
                         'authorlogin' => $this->config['author'],
                         'summary' => $testResult['summary'] !== null ? $testResult['summary'] : '',
                         'preconditions' => $testResult['preconditions'] !== null ? $testResult['preconditions'] : '',
-                        'importance' => $testResult['importance'] !== null ? $testResult['importance'] : '',
-                        'executionType' => $testResult['executionType'] !== null ? $testResult['executionType'] : '',
+                        'importance' => $testResult['importance'] !== null ? $testResult['importance'] : 2,
+                        'executiontype' => $testResult['executionType'] !== null ? $testResult['executionType'] : 2,
                         'order' => $testResult['order'] !== null ? $testResult['order'] : '',
+                        'status' => 7,
                         'steps' => [],
-                        'estimatedexecduration' => $testResult['elapsed']
+                        'estimatedexecduration' => round($testResult['elapsed'] / 60 / 1000, 2) // minutes
                     ];
-                    var_dump('Creo nuevo case', $params);
                     $resultNewCase =  $this->getConnection()->execute('createTestCase', $params);
-                    var_dump($resultNewCase);
+                    echo 'Sent to TestLink:' . current($resultNewCase)['message'];
+                    $testCase = current($this->getConnection()->execute('getTestCase', [
+                        'testcaseid' => current($resultNewCase)['additionalInfo']['id']
+                    ]));
                 }
+//                var_dump($testCase);
+                // Add case to test plan
+                $resultAddTestToPlan = $this->getConnection()->execute('addTestCaseToTestPlan', [
+                    'testprojectid' => $this->project['id'],
+                    'testplanid' => $this->plan['id'],
+                    'testcaseexternalid' => $testCase['full_tc_external_id'],
+                    'overwrite' => 1,
+                    'version' => 1
+                ]);
+//                var_dump($resultAddTestToPlan);
+
+                $resultExecution = $this->getConnection()->execute('reportTCResult', [
+                    'testcaseid' => $testCase['testcase_id'],
+                    'testplanid' => $this->plan['id'],
+                    'buildid' => $this->build['id'],
+                    'status' => $testResult['status'],
+                    'execduration' => round($testResult['elapsed'] / 60 / 1000, 2), // minutes
+                ]);
+//                var_dump($resultExecution);
+                echo 'Result for "' . $testResult['name'] . '" sent';
             }
         }
     }
@@ -276,9 +364,8 @@ class Extension extends CodeceptionExtension
     }
 
     /**
-     * @param int   $case   TestLink Case ID
      * @param int   $status TestLink Status ID
-     * @param array $other  Array of other elements to add to the result (comments, elapsed, etc)
+     * @param TestEvent $event
      */
     public function handleResult($status, TestEvent $event)
     {
@@ -296,10 +383,10 @@ class Extension extends CodeceptionExtension
                 'importance' => $this->getImportanceForTest($test),
                 'executionType' => $this->getExecutionTypeForTest($test),
                 'order' => $this->getOrderForTest($test),
-                'status_id' => $status,
+                'status' => $status,
             ];
 
-            $result['elapsed'] = $this->formatTime($event->getTime());
+            $result['elapsed'] = $event->getTime();
 
             $this->results[$this->getSuiteForTest($test)][] = $result;
         }
@@ -431,41 +518,6 @@ class Extension extends CodeceptionExtension
         }
 
         return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_ORDER);
-    }
-
-    /**
-     * Formats a float seconds to a format that TestLink recognizes.  Will parse to hours, minutes, and seconds.
-     *
-     * @param float $time
-     *
-     * @return string
-     */
-    public function formatTime($time)
-    {
-        // TestLink doesn't support subsecond times
-        if ($time < 1.0) {
-            return '0s';
-        }
-
-        $formatted = '';
-        $intTime = round($time);
-        $intervals = [
-            'h' => 3600,
-            'm' => 60,
-            's' => 1,
-        ];
-
-        foreach ($intervals as $suffix => $divisor) {
-            if ($divisor > $intTime) {
-                continue;
-            }
-
-            $amount = floor($intTime / $divisor);
-            $intTime -= $amount * $divisor;
-            $formatted .= $amount.$suffix.' ';
-        }
-
-        return trim($formatted);
     }
 
     protected function getPrefix($str)
